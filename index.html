@@ -88,64 +88,36 @@
             };
 
             try {
-                // Cipta akaun sekarang; email sedia ada tetap boleh meneruskan ke BCL.
-                let firebaseUser = null;
+                // Akaun hanya dicipta apabila admin meluluskan pendaftaran.
+                newRequest.firebase_account_status = 'pending';
+                newRequest.email_status = 'sending';
+
+                // Hantar email automatik tanpa mencipta akaun semasa Register.
+                // Kegagalan email tidak menghalang simpanan pending dan ke BCL.
+                let emailTimer;
                 try {
-                    const credential = await createUserWithEmailAndPassword(targetAuth, custEmail, defaultPassword);
-                    firebaseUser = credential.user;
-                } catch (authError) {
-                    if (authError.code !== 'auth/email-already-in-use') throw authError;
-                }
-
-                newRequest.firebase_account_status = firebaseUser ? 'created' : 'existing';
-                if (firebaseUser) newRequest.firebase_uid = firebaseUser.uid;
-                newRequest.email_status = firebaseUser ? 'sending' : 'skipped_existing';
-
-                if (firebaseUser) {
-                    try {
-                        await set(ref(targetDb, 'users/' + firebaseUser.uid), {
-                            nama: custNama,
-                            email: custEmail,
-                            nofon: custNofon,
-                            reseller_nama: resNama,
-                            reseller_email: resEmail,
-                            reseller_nofon: resNofon,
-                            createdAt: new Date().toISOString()
-                        });
-                    } catch (profileError) {
-                        // Akaun telah dicipta; data profil akan disimpan dalam pending.
-                        console.error("Profil belum disimpan:", profileError);
-                    }
-                }
-
-                // Cuba hantar email dengan had masa; kegagalan email tidak menghalang ke BCL.
-                // Email sedia ada tidak dihantar email atau password baharu.
-                if (firebaseUser) {
-                    let emailTimer;
-                    try {
-                        await Promise.race([
-                            emailjs.send('service_hd5rpgc', 'template_9sh4gw2', {
-                                to_name: custNama,
-                                to_email: custEmail,
-                                password: defaultPassword
-                            }),
-                            new Promise((_, reject) => {
-                                emailTimer = setTimeout(() => {
-                                    const timeoutError = new Error('Penghantaran email melebihi had masa.');
-                                    timeoutError.code = 'email/timeout';
-                                    reject(timeoutError);
-                                }, 10000);
-                            })
-                        ]);
-                        newRequest.email_status = 'sent';
-                        newRequest.email_sent_at = new Date().toISOString();
-                    } catch (emailError) {
-                        newRequest.email_status = emailError.code === 'email/timeout' ? 'timeout' : 'failed';
-                        console.error("Email pendaftaran gagal dihantar:", emailError);
-                        // Terus simpan pending dan ke BCL tanpa popup yang menghalang.
-                    } finally {
-                        clearTimeout(emailTimer);
-                    }
+                    await Promise.race([
+                        emailjs.send('service_hd5rpgc', 'template_9sh4gw2', {
+                            to_name: custNama,
+                            to_email: custEmail,
+                            password: defaultPassword
+                        }),
+                        new Promise((_, reject) => {
+                            emailTimer = setTimeout(() => {
+                                const timeoutError = new Error('Penghantaran email melebihi had masa.');
+                                timeoutError.code = 'email/timeout';
+                                reject(timeoutError);
+                            }, 10000);
+                        })
+                    ]);
+                    newRequest.email_status = 'sent';
+                    newRequest.email_sent_at = new Date().toISOString();
+                } catch (emailError) {
+                    newRequest.email_status = emailError.code === 'email/timeout' ? 'timeout' : 'failed';
+                    console.error("Email pendaftaran gagal dihantar:", emailError);
+                    // Terus simpan pending dan ke BCL tanpa popup yang menghalang.
+                } finally {
+                    clearTimeout(emailTimer);
                 }
 
                 // Rules membenarkan pelanggan mencipta rekod baru sahaja.
